@@ -48,6 +48,7 @@ import org.keycloak.protocol.oidc.encode.TokenContextEncoderProvider;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.IDToken;
+import org.keycloak.representations.JsonWebToken;
 import org.keycloak.representations.dpop.DPoP;
 import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
@@ -124,7 +125,7 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
     }
 
     protected AuthenticationManager.AuthResult processSubjectToken() {
-        if (!OAuth2Constants.ACCESS_TOKEN_TYPE.equals(context.getParams().getSubjectTokenType())) {
+        if (!getSupportedSubjectTokenType().equals(context.getParams().getSubjectTokenType())) {
             event.detail(Details.REASON, "subject_token_type invalid");
             event.error(Errors.INVALID_REQUEST);
             throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_REQUEST, "Invalid subject token type", Response.Status.BAD_REQUEST);
@@ -134,8 +135,7 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
 
         event.detail(Details.REQUESTED_TOKEN_TYPE, context.getParams().getRequestedTokenType());
 
-        AuthenticationManager.AuthResult authResult = AuthenticationManager.verifyIdentityToken(session, realm, session.getContext().getUri(), clientConnection, true, true, null,
-                false, subjectToken, context.getHeaders(), verifier -> {});
+        AuthenticationManager.AuthResult authResult = verifySubjectToken(subjectToken);
         if (authResult == null) {
             event.detail(Details.REASON, "subject_token validation failure");
             event.error(Errors.INVALID_TOKEN);
@@ -159,6 +159,22 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
         validateSubjectToken(token);
 
         return authResult;
+    }
+
+    /**
+     * The subject_token_type accepted by this provider. 
+     */
+    protected String getSupportedSubjectTokenType() {
+        return OAuth2Constants.ACCESS_TOKEN_TYPE;
+    } 
+    
+    /**
+     * Verifies the subject token and resolves its user and session.
+     * Returns null if the token is invalid. 
+     */
+    protected AuthenticationManager.AuthResult verifySubjectToken(String subjectToken) {
+        return AuthenticationManager.verifyIdentityToken(session, realm, session.getContext().getUri(), clientConnection, true, 
+            true, null, false, subjectToken, context.getHeaders(), verifier -> {});
     }
 
 
@@ -229,7 +245,7 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
     }
 
     @Override
-    protected void validateAudience(AccessToken token, boolean disallowOnHolderOfTokenMismatch, List<ClientModel> targetAudienceClients) {
+    protected void validateAudience(JsonWebToken token, boolean disallowOnHolderOfTokenMismatch, List<ClientModel> targetAudienceClients) {
         ClientModel tokenHolder = token == null ? null : realm.getClientByClientId(token.getIssuedFor());
 
         if (client.isPublicClient()) {
@@ -263,9 +279,36 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
         }
     }
 
+    protected Response buildTokenExchangeResponse(TokenManager.AccessTokenResponseBuilder responseBuilder, String requestedTokenType, List<ClientModel> targetAudienceClients) {
+        
+        AccessTokenResponse res;
+        if (OAuth2Constants.ID_TOKEN_TYPE.equals(requestedTokenType)) {
+            // Using the id-token inside "access_token" parameter as per description of "access_token" parameter under https://datatracker.ietf.org/doc/html/rfc8693#name-successful-response
+            res = responseBuilder.generateIDToken().build();
+            res.setToken(res.getIdToken());
+            res.setIdToken(null);
+            res.setTokenType(TokenUtil.TOKEN_TYPE_NA);
+        } else {
+            String scopeParam = params.getScope();
+            if (TokenUtil.isOIDCRequest(scopeParam)) {
+                responseBuilder.generateIDToken().generateAccessTokenHash();
+            }
+            res = responseBuilder.build();
+        }
+
+        res.setOtherClaims(OAuth2Constants.ISSUED_TOKEN_TYPE, requestedTokenType);
+
+        if (responseBuilder.getAccessToken().getAudience() != null) {
+            event.detail(Details.AUDIENCE, CollectionUtil.join(List.of(responseBuilder.getAccessToken().getAudience()), " "));
+        }
+        event.success();
+
+        return cors.add(Response.ok(res, MediaType.APPLICATION_JSON_TYPE));
+    }
+
     // For now, include "scope" parameter as is
     @Override
-    protected String getRequestedScope(AccessToken token, List<ClientModel> targetAudienceClients) {
+    protected String getRequestedScope(JsonWebToken token, List<ClientModel> targetAudienceClients) {
         String scope = formParams.getFirst(OAuth2Constants.SCOPE);
 
         if (!TokenManager.isValidScope(session, scope, client)) {
@@ -280,7 +323,7 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
 
     @Override
     protected Response exchangeClientToOIDCClient(UserModel targetUser, UserSessionModel targetUserSession, String requestedTokenType,
-                                                  List<ClientModel> targetAudienceClients, String scope, AccessToken subjectToken) {
+                                                  List<ClientModel> targetAudienceClients, String scope, JsonWebToken subjectToken) {
         RootAuthenticationSessionModel rootAuthSession = new AuthenticationSessionManager(session).createAuthenticationSession(realm, false);
         AuthenticationSessionModel authSession = createSessionModel(targetUserSession, rootAuthSession, targetUser, client, scope);
         boolean isOfflineSession = targetUserSession.isOffline();
@@ -347,7 +390,7 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
             }
 
             TokenManager.AccessTokenResponseBuilder responseBuilder = tokenManager.responseBuilder(realm, client, event, session,
-                    clientSessionCtx.getClientSession().getUserSession(), clientSessionCtx).generateAccessToken();
+                clientSessionCtx.getClientSession().getUserSession(), clientSessionCtx).generateAccessToken();
 
             checkRequestedAudiences(responseBuilder);
 
@@ -371,30 +414,8 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
                 throw new CorsErrorResponseException(cors, cpe.getError(), cpe.getErrorDetail(), cpe.getErrorStatus());
             }
 
-            AccessTokenResponse res;
-            if (OAuth2Constants.ID_TOKEN_TYPE.equals(requestedTokenType)) {
-                // Using the id-token inside "access_token" parameter as per description of "access_token" parameter under https://datatracker.ietf.org/doc/html/rfc8693#name-successful-response
-                res = responseBuilder.generateIDToken().build();
-                res.setToken(res.getIdToken());
-                res.setIdToken(null);
-                res.setTokenType(TokenUtil.TOKEN_TYPE_NA);
-            } else {
-                String scopeParam = params.getScope();
-                if (TokenUtil.isOIDCRequest(scopeParam)) {
-                    responseBuilder.generateIDToken().generateAccessTokenHash();
-                }
-                res = responseBuilder.build();
-            }
-
-            res.setOtherClaims(OAuth2Constants.ISSUED_TOKEN_TYPE, requestedTokenType);
-
-            if (responseBuilder.getAccessToken().getAudience() != null) {
-                event.detail(Details.AUDIENCE, CollectionUtil.join(List.of(responseBuilder.getAccessToken().getAudience()), " "));
-            }
-
-            event.success();
-
-            return cors.add(Response.ok(res, MediaType.APPLICATION_JSON_TYPE));
+            return buildTokenExchangeResponse(responseBuilder, requestedTokenType, targetAudienceClients);
+        
         } catch (RuntimeException e) {
             // Cleanup client-session if created in this request
             if (newClientSessionCreated) {
@@ -413,7 +434,11 @@ public class StandardTokenExchangeProvider extends AbstractTokenExchangeProvider
     }
 
     protected void checkRequestedAudiences(TokenManager.AccessTokenResponseBuilder responseBuilder) {
-        Set<String> missingAudience = TokenUtils.checkRequestedAudiences(responseBuilder.getAccessToken(), params.getAudience());
+        checkRequestedAudiences(responseBuilder.getAccessToken());
+    }
+
+    protected void checkRequestedAudiences(JsonWebToken token) {
+        Set<String> missingAudience = TokenUtils.checkRequestedAudiences(token, params.getAudience());
         if (!missingAudience.isEmpty()) {
             final String missingAudienceString = CollectionUtil.join(missingAudience);
             event.detail(Details.REASON, "Requested audience not available: " + missingAudienceString);

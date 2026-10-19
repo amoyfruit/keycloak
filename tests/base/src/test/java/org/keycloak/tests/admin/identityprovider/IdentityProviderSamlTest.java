@@ -212,6 +212,22 @@ public class IdentityProviderSamlTest extends AbstractIdentityProviderTest {
                 + " ID=\"_1\" Version=\"2.0\" IssueInstant=\"2026-01-01T00:00:00Z\"/>");
     }
 
+    @Test
+    public void testSamlMetadataImportDefaultsResponseSignatureValidationToEnabled() {
+        String metadata = "<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://idp.example\">"
+                + "<IDPSSODescriptor WantAuthnRequestsSigned=\"false\" protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\">"
+                + "<SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.example/sso\"/>"
+                + "</IDPSSODescriptor></EntityDescriptor>";
+        MultipartFormDataOutput form = new MultipartFormDataOutput();
+        form.addFormData("providerId", "saml", MediaType.TEXT_PLAIN_TYPE);
+        form.addFormData("file", metadata, MediaType.APPLICATION_XML_TYPE, "metadata.xml");
+
+        Map<String, String> config = managedRealm.admin().identityProviders().importFrom(form);
+
+        Assertions.assertEquals("false", config.get(SAMLIdentityProviderConfig.WANT_AUTHN_REQUESTS_SIGNED));
+        Assertions.assertEquals("true", config.get(SAMLIdentityProviderConfig.VALIDATE_SIGNATURE));
+    }
+
     private void assertImportConfigFails(String path, String body) {
         httpServer.createContext(path, exchange -> HttpServerUtil.sendResponse(exchange, 200, null, body));
 

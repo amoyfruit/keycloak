@@ -18,7 +18,6 @@
 package org.keycloak.testsuite.organization.broker;
 
 import java.util.List;
-import java.util.Map;
 
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -199,9 +198,13 @@ public class OrganizationIdentityProviderTest extends AbstractOrganizationTest {
         OrganizationResource orgResource = managedRealm.admin().organizations().get(orgRep.getId());
         OrganizationIdentityProviderResource orgIdPResource = orgResource.identityProviders().get(bc.getIDPAlias());
         IdentityProviderRepresentation idpRepresentation = createRep("some-broker", "oidc");
-        getCleanup().addCleanup(() -> managedRealm.admin().identityProviders().get(idpRepresentation.getAlias()).remove());
-        //create IdP in realm not bound to Org
-        managedRealm.admin().identityProviders().create(idpRepresentation).close();
+
+        getCleanup().addCleanup(() ->
+                managedRealm.admin().identityProviders().get(idpRepresentation.getAlias()).remove());
+
+        try (Response response = managedRealm.admin().identityProviders().create(idpRepresentation)) {
+            assertThat(response.getStatus(), equalTo(Status.CREATED.getStatusCode()));
+        }
 
         try (Response response = orgIdPResource.delete()) {
             assertThat(response.getStatus(), equalTo(Status.NO_CONTENT.getStatusCode()));
@@ -231,28 +234,31 @@ public class OrganizationIdentityProviderTest extends AbstractOrganizationTest {
     @Test
     public void testAddIdpFromDifferentRealm() {
         String orgId = createOrganization().getId();
-        IdentityProviderRepresentation idpRepresentation = createRep("master-identity-provider", "oidc");
-        idpRepresentation.setConfig(Map.of("validateSignature", "false"));
-        adminClient.realm("master").identityProviders().create(idpRepresentation).close();
+        IdentityProviderRepresentation idpRepresentation =
+                createRep("master-identity-provider", "oidc");
+
+        try (Response response = adminClient.realm("master")
+                .identityProviders().create(idpRepresentation)) {
+            assertThat(response.getStatus(), equalTo(Status.CREATED.getStatusCode()));
+        }
 
         try {
-                getTestingClient().server(TEST_REALM_NAME).run(session -> {
+            getTestingClient().server(TEST_REALM_NAME).run(session -> {
                 OrganizationProvider provider = session.getProvider(OrganizationProvider.class);
                 OrganizationModel organization = provider.getById(orgId);
 
-                // adjust the session context to use the master realm to be able to retrieve the idp.
                 RealmModel realm = session.realms().getRealmByName("master");
                 RealmModel current = session.getContext().getRealm();
                 session.getContext().setRealm(realm);
-                IdentityProviderModel idp = session.identityProviders().getByAlias("master-identity-provider");
+                IdentityProviderModel idp =
+                        session.identityProviders().getByAlias("master-identity-provider");
 
-                // restore the context and try to add the idp.
                 session.getContext().setRealm(current);
                 assertFalse(provider.addIdentityProvider(organization, idp));
             });
-
         } finally {
-            adminClient.realm("master").identityProviders().get("master-identity-provider").remove();
+            adminClient.realm("master").identityProviders()
+                    .get("master-identity-provider").remove();
         }
     }
 
@@ -342,6 +348,11 @@ public class OrganizationIdentityProviderTest extends AbstractOrganizationTest {
         idp.setDisplayName(alias);
         idp.setProviderId(providerId);
         idp.setEnabled(true);
+
+        if ("oidc".equals(providerId)) {
+            idp.getConfig().put("validateSignature", "false");
+        }
+
         return idp;
     }
 }

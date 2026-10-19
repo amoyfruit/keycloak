@@ -79,4 +79,54 @@ public class KcSamlBrokerTest extends AbstractKcSamlBrokerTest {
                 || errorPage.getError().contains("authenticating"),
                 "Expected signature validation error but got: " + errorPage.getError());
     }
+
+    @Test
+    public void testLoginFailsWhenWantAssertionsSignedIsOmitted() {
+        configureSignedResponseWithUnsignedAssertion(true);
+
+        oauth.openLoginForm();
+        logInWithBroker();
+        loginPage.fillLogin(getUserLogin(), getUserPassword());
+        loginPage.submit();
+
+        // Assert that login failed due to unsigned assertion error
+        errorPage.assertCurrent();
+        Assertions.assertTrue(errorPage.getError().contains("invalid")
+                        || errorPage.getError().contains("signature")
+                        || errorPage.getError().contains("authenticating"),
+                "Expected unsigned assertion to be rejected, but got: " + errorPage.getError());
+    }
+
+    @Test
+    public void testLoginSucceedsWhenWantAssertionsSignedIsFalse() {
+        configureSignedResponseWithUnsignedAssertion(false);
+
+        loginUser();
+    }
+
+
+    private void configureSignedResponseWithUnsignedAssertion(boolean wantAssertionsSigned) {
+        String samlClientId = consumerRealm.getBaseUrl();
+        ClientRepresentation client = providerRealm.admin().clients().findByClientId(samlClientId).get(0);
+
+        client.getAttributes().put(SamlConfigAttributes.SAML_ASSERTION_SIGNATURE, "false");
+        client.getAttributes().put(SamlConfigAttributes.SAML_SERVER_SIGNATURE, "true");
+        client.getAttributes().put(SamlConfigAttributes.SAML_SIGNATURE_ALGORITHM, "RSA_SHA256");
+        providerRealm.admin().clients().get(client.getId()).update(client);
+
+        IdentityProviderRepresentation idp =
+                consumerRealm.admin().identityProviders().get(getIdpAlias()).toRepresentation();
+
+        Map<String, String> config = idp.getConfig();
+        config.put(SAMLIdentityProviderConfig.VALIDATE_SIGNATURE, "true");
+        config.put(SAMLIdentityProviderConfig.SIGNING_CERTIFICATE_KEY, activeRs256SigCert(providerRealm));
+
+        if (wantAssertionsSigned) {
+            config.remove(SAMLIdentityProviderConfig.WANT_ASSERTIONS_SIGNED);
+        } else {
+            config.put(SAMLIdentityProviderConfig.WANT_ASSERTIONS_SIGNED, "false");
+        }
+
+        consumerRealm.admin().identityProviders().get(getIdpAlias()).update(idp);
+    }
 }

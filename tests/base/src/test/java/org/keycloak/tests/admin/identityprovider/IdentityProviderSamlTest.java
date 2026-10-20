@@ -212,6 +212,22 @@ public class IdentityProviderSamlTest extends AbstractIdentityProviderTest {
                 + " ID=\"_1\" Version=\"2.0\" IssueInstant=\"2026-01-01T00:00:00Z\"/>");
     }
 
+    @Test
+    public void testSamlMetadataImportDefaultsResponseSignatureValidationToEnabled() {
+        String metadata = "<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://idp.example\">"
+                + "<IDPSSODescriptor WantAuthnRequestsSigned=\"false\" protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\">"
+                + "<SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.example/sso\"/>"
+                + "</IDPSSODescriptor></EntityDescriptor>";
+        MultipartFormDataOutput form = new MultipartFormDataOutput();
+        form.addFormData("providerId", "saml", MediaType.TEXT_PLAIN_TYPE);
+        form.addFormData("file", metadata, MediaType.APPLICATION_XML_TYPE, "metadata.xml");
+
+        Map<String, String> config = managedRealm.admin().identityProviders().importFrom(form);
+
+        Assertions.assertEquals("false", config.get(SAMLIdentityProviderConfig.WANT_AUTHN_REQUESTS_SIGNED));
+        Assertions.assertEquals("true", config.get(SAMLIdentityProviderConfig.VALIDATE_SIGNATURE));
+    }
+
     private void assertImportConfigFails(String path, String body) {
         httpServer.createContext(path, exchange -> HttpServerUtil.sendResponse(exchange, 200, null, body));
 
@@ -449,9 +465,6 @@ public class IdentityProviderSamlTest extends AbstractIdentityProviderTest {
     }
 
     private void assertSamlConfig(Map<String, String> config, boolean postBindingResponse, boolean hasHideOnLoginPage) {
-        // import endpoint simply converts IDPSSODescriptor into key value pairs.
-        // check that saml-idp-metadata.xml was properly converted into key value pairs
-        //System.out.println(config);
         List<String> keys = new ArrayList<>(List.of(
                 "validateSignature",
                 "singleLogoutServiceUrl",
@@ -468,10 +481,22 @@ public class IdentityProviderSamlTest extends AbstractIdentityProviderTest {
                 "loginHint",
                 "idpEntityId"
         ));
+
         if (hasHideOnLoginPage) {
             keys.add("hideOnLoginPage");
         }
-        assertThat(config.keySet(), containsInAnyOrder(keys.toArray()));
+
+        Set<String> actualKeys = new HashSet<>(config.keySet());
+        if (!hasHideOnLoginPage) {
+            actualKeys.remove(SAMLIdentityProviderConfig.WANT_ASSERTIONS_SIGNED);
+        }
+        assertThat(actualKeys, containsInAnyOrder(keys.toArray()));
+        String wantAssertionsSigned = config.get(SAMLIdentityProviderConfig.WANT_ASSERTIONS_SIGNED);
+        if (hasHideOnLoginPage) {
+            Assertions.assertNull(wantAssertionsSigned, "import-config should not materialize wantAssertionsSigned default");
+        } else {
+            Assertions.assertTrue(wantAssertionsSigned == null || Boolean.parseBoolean(wantAssertionsSigned), "wantAssertionsSigned must be absent or true by default");
+        }
         assertThat(config, hasEntry("validateSignature", "true"));
         assertThat(config, hasEntry("singleLogoutServiceUrl", "http://localhost:8080/auth/realms/master/protocol/saml"));
         assertThat(config, hasEntry("artifactResolutionServiceUrl", "http://localhost:8080/auth/realms/master/protocol/saml/resolve"));
@@ -482,9 +507,11 @@ public class IdentityProviderSamlTest extends AbstractIdentityProviderTest {
         assertThat(config, hasEntry("wantAuthnRequestsSigned", "true"));
         assertThat(config, hasEntry("addExtensionsElementWithKeyInfo", "false"));
         assertThat(config, hasEntry("nameIDPolicyFormat", "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"));
+
         if (hasHideOnLoginPage) {
             assertThat(config, hasEntry("hideOnLoginPage", "true"));
         }
+
         assertThat(config, hasEntry("idpEntityId", "http://localhost:8080/auth/realms/master"));
         assertThat(config, hasEntry(is("signingCertificate"), notNullValue()));
     }

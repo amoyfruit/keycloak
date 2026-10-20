@@ -43,8 +43,7 @@ public class AbstractIdentityProviderTest {
             idpRep.getConfig().remove(IdentityProviderModel.LEGACY_HIDE_ON_LOGIN_ATTR);
         }
 
-        AdminEventAssertion.assertEvent(adminEvents.poll(), OperationType.CREATE,
-                AdminEventPaths.identityProviderPath(idpRep.getAlias()), idpRep, ResourceType.IDENTITY_PROVIDER);
+        AdminEventAssertion.assertEvent(adminEvents.poll(), OperationType.CREATE, AdminEventPaths.identityProviderPath(idpRep.getAlias()), idpRep, ResourceType.IDENTITY_PROVIDER);
 
         if (secret != null) {
             idpRep.getConfig().put("clientSecret", secret);

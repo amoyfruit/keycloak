@@ -39,12 +39,13 @@ public final class NamedJpaConnectionProviderFactory extends AbstractJpaConnecti
 
     private String unitName;
     private String dataSourceName;
+    private boolean dataSourceRequired = true;
 
     @Override
     public void postInit(KeycloakSessionFactory factory) {
         // Skip an inactive datasource's persistence unit instead of failing to resolve its (deactivated) EntityManagerFactory.
         String dsName = getDsName();
-        if (!DataSourceUtil.isDefault(dsName)) { // default DS is always active
+        if (dataSourceRequired && !DataSourceUtil.isDefault(dsName)) { // default DS is always active
             var dsInstance = Arc.requireContainer().select(AgroalDataSource.class, new DataSource.DataSourceLiteral(dsName));
             if (dsInstance.isResolvable() && !dsInstance.getHandle().getBean().isActive()) {
                 if (!isExplicitlyDisabled(dsName)) {
@@ -91,8 +92,20 @@ public final class NamedJpaConnectionProviderFactory extends AbstractJpaConnecti
         this.unitName = unitName;
     }
 
+    public String getDataSourceName() {
+        return dataSourceName;
+    }
+
     public void setDataSourceName(String dataSourceName) {
         this.dataSourceName = dataSourceName;
+    }
+
+    public boolean isDataSourceRequired() {
+        return dataSourceRequired;
+    }
+
+    public void setDataSourceRequired(boolean dataSourceRequired) {
+        this.dataSourceRequired = dataSourceRequired;
     }
 
     @Override

@@ -162,7 +162,7 @@ jobs:
           driver: docker
 
       - name: Install OPM
-        uses: redhat-actions/openshift-tools-installer@v1
+        uses: redhat-actions/openshift-tools-installer@v3
         with:
           source: github
           opm: 1.21.0

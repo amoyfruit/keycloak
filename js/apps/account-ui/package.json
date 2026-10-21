@@ -32,7 +32,7 @@
     "@vitejs/plugin-react-swc": "^3.3.2",
     "@keycloak/keycloak-admin-client": "workspace:*",
     "vite": "^4.4.2",
-    "vite-plugin-checker": "^0.6.1"
+    "vite-plugin-checker": "^0.14.5"
   },
   "wireit": {
     "dev": {

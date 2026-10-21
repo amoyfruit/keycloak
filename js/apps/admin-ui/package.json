@@ -70,7 +70,7 @@
     "admin-ui": "file:",
     "dagre": "^0.8.5",
     "file-saver": "^2.0.5",
-    "file-selector": "^0.6.0",
+    "file-selector": "^5.0.1",
     "flat": "^5.0.2",
     "i18next": "^23.2.8",
     "i18next-http-backend": "^2.2.1",

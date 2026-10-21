@@ -50,7 +50,7 @@
     "@types/node": "^20.4.1",
     "chai": "^4.3.7",
     "mocha": "^10.2.0",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.2"
   },
   "author": {
     "name": "Red Hat, Inc.",
